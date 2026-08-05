@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "12379989043",
+    "project_id": "chatyk-60aa3",
+    "storage_bucket": "chatyk-60aa3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:12379989043:android:7ad08c6a6468874902ef46",
+        "android_client_info": {
+          "package_name": "com.example.messenger"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKsZjntcaMp2FqE2E5vpcvMgBrIJQ1roM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
