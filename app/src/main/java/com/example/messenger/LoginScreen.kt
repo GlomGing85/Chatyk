@@ -111,6 +111,13 @@ fun LoginScreen(vm: ChatViewModel) {
                 style = MaterialTheme.typography.bodySmall
             )
         }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "База даних: ${vm.dbUrl}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

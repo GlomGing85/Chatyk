@@ -50,7 +50,9 @@ class ChatViewModel : ViewModel() {
         private set
     var busy by mutableStateOf(false)             // йде вхід?
         private set
-    var error by mutableStateOf<String?>(null)    // помилка, якщо є
+    var error by mutableStateOf<String?>(null)    // помилка входу, якщо є
+        private set
+    var dbError by mutableStateOf<String?>(null)  // помилка бази даних (видно в чаті)
         private set
 
     var myName by mutableStateOf("")
@@ -70,6 +72,10 @@ class ChatViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseDatabase.getInstance()
 
+    /** Адреса бази даних, до якої реально підключений додаток (для перевірки) */
+    val dbUrl: String
+        get() = runCatching { db.reference.toString() }.getOrDefault("?")
+
     private var messagesListener: ChildEventListener? = null
     private var presenceListener: ValueEventListener? = null
     private var presenceRef: DatabaseReference? = null
@@ -82,6 +88,7 @@ class ChatViewModel : ViewModel() {
         if (busy) return
         busy = true
         error = null
+        dbError = null
         viewModelScope.launch {
             try {
                 if (auth.currentUser == null) {
@@ -122,7 +129,9 @@ class ChatViewModel : ViewModel() {
                 }
 
                 override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
-                override fun onCancelled(error: DatabaseError) = Unit
+                override fun onCancelled(error: DatabaseError) {
+                    dbError = "Помилка читання повідомлень: ${error.message}"
+                }
             })
 
         // 2) Слухач "хто зараз у кімнаті"
@@ -140,7 +149,9 @@ class ChatViewModel : ViewModel() {
                 this@ChatViewModel.presence = map
             }
 
-            override fun onCancelled(error: DatabaseError) = Unit
+            override fun onCancelled(error: DatabaseError) {
+                dbError = "Помилка статусу користувачів: ${error.message}"
+            }
         })
 
         // 3) Пишемо про себе: "я в кімнаті"
@@ -170,6 +181,9 @@ class ChatViewModel : ViewModel() {
             "ts" to ServerValue.TIMESTAMP
         )
         db.getReference("rooms/$roomCode/messages").push().setValue(data)
+            .addOnFailureListener { e ->
+                dbError = "Повідомлення не надіслано: ${e.message}"
+            }
     }
 
     /** Вийти з кімнати та повернутися на екран входу */
