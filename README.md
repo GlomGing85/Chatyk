@@ -8,6 +8,12 @@
 
 ---
 
+[![Made with Arena.ai Agent](./arena-agent.svg)](https://arena.ai/agent)
+
+![Kotlin](https://img.shields.io/badge/kotlin-%237F52FF.svg?style=for-the-badge&logo=kotlin&logoColor=white)
+
+---
+
 ## 📱 Що вміє додаток
 
 - Вхід без реєстрації (анонімно, одним натисканням)
