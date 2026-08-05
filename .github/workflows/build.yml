@@ -1,0 +1,46 @@
+# Цей файл — "рецепт" для GitHub Actions.
+# Щоразу, коли ти заливаєш код у гілку main (або натискаєш Run workflow),
+# GitHub безкоштовно збирає APK у хмарі та кладе його в артефакти.
+
+name: Збірка APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # дозволяє запускати збірку вручну кнопкою
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Отримати код
+        uses: actions/checkout@v4
+
+      - name: Встановити Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Перевірити, чи є google-services.json
+        run: |
+          if [ -f app/google-services.json ]; then
+            echo "✅ google-services.json знайдено"
+          else
+            echo "❌ У папці app/ немає файлу google-services.json"
+            echo "   Як його отримати — дивись розділ «Крок 2: Firebase» у README.md"
+            exit 1
+          fi
+
+      - name: Налаштувати Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Зібрати APK
+        run: chmod +x gradlew && ./gradlew assembleDebug
+
+      - name: Завантажити APK як артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatyk-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 90

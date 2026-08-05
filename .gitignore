@@ -1,0 +1,12 @@
+# Файли, які НЕ потрібно завантажувати на GitHub
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.keystore
