@@ -1,6 +1,9 @@
 package com.example.messenger
 
+import android.content.Intent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +21,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -40,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +61,9 @@ import kotlinx.coroutines.launch
 private const val ONLINE_WINDOW_MS = 45_000L
 private val OnlineGreen = Color(0xFF6FCF97)
 
+/** Емодзі, доступні для реакцій на повідомлення */
+private val ReactionEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🔥")
+
 /**
  * Екран чату: стрічка повідомлень + поле для тексту.
  * Повідомлення з'являються в реальному часі.
@@ -63,8 +74,10 @@ fun ChatScreen(vm: ChatViewModel) {
     val myUid = vm.myUid ?: return
     val messages = vm.messages
     val presence = vm.presence
+    val context = LocalContext.current
 
     var text by remember { mutableStateOf("") }
+    var reactingId by remember { mutableStateOf<String?>(null) } // яке повідомлення "відкрито" для реакцій
     val listState = rememberLazyListState()
 
     // "Годинник": кожні 10 секунд оновлюємо час,
@@ -114,6 +127,24 @@ fun ChatScreen(vm: ChatViewModel) {
                         }
                     },
                     actions = {
+                        // Поділитися кодом кімнати з другом
+                        IconButton(onClick = {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(
+                                    Intent.EXTRA_TEXT,
+                                    "Заходь у Чатик! 💬\nКод кімнати: ${vm.roomCode}"
+                                )
+                            }
+                            context.startActivity(
+                                Intent.createChooser(shareIntent, "Поділитися кодом кімнати")
+                            )
+                        }) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = "Поділитися кодом кімнати"
+                            )
+                        }
                         TextButton(onClick = { vm.exit() }) { Text("Вийти") }
                     }
                 )
@@ -190,7 +221,17 @@ fun ChatScreen(vm: ChatViewModel) {
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(messages, key = { it.id }) { m ->
-                            MessageBubble(m, isMine = m.uid == myUid)
+                            MessageBubble(
+                                m = m,
+                                isMine = m.uid == myUid,
+                                showPicker = reactingId == m.id,
+                                onLongPress = { reactingId = m.id },
+                                onPickEmoji = { emoji ->
+                                    vm.toggleReaction(m.id, emoji)
+                                    reactingId = null
+                                },
+                                onDismissPicker = { reactingId = null }
+                            )
                         }
                     }
                 }
@@ -212,9 +253,17 @@ fun ChatScreen(vm: ChatViewModel) {
     }
 }
 
-/** Один "бульбашковий" елемент повідомлення */
+/** Один "бульбашковий" елемент повідомлення (з реакціями) */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(m: Message, isMine: Boolean) {
+private fun MessageBubble(
+    m: Message,
+    isMine: Boolean,
+    showPicker: Boolean,
+    onLongPress: () -> Unit,
+    onPickEmoji: (String) -> Unit,
+    onDismissPicker: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
@@ -226,6 +275,43 @@ private fun MessageBubble(m: Message, isMine: Boolean) {
                 color = MaterialTheme.colorScheme.primary
             )
         }
+
+        // Рядок вибору емодзі (з'являється після довгого тапу)
+        if (showPicker) {
+            Row(
+                modifier = Modifier
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ReactionEmojis.forEach { emoji ->
+                    Text(
+                        emoji,
+                        fontSize = 20.sp,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .combinedClickable(
+                                onClick = { onPickEmoji(emoji) },
+                                onLongClick = onDismissPicker
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                Text(
+                    "✖",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .combinedClickable(onClick = onDismissPicker, onLongClick = onDismissPicker)
+                        .padding(4.dp)
+                )
+            }
+        }
+
+        // Саме повідомлення
         Column(
             modifier = Modifier
                 .padding(top = 2.dp)
@@ -242,6 +328,10 @@ private fun MessageBubble(m: Message, isMine: Boolean) {
                     if (isMine) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceVariant
                 )
+                .combinedClickable(
+                    onClick = { },
+                    onLongClick = onLongPress
+                )
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
@@ -255,6 +345,25 @@ private fun MessageBubble(m: Message, isMine: Boolean) {
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.End)
             )
+        }
+
+        // Чіпси з реакціями, напр. "👍 2" "😂 1"
+        if (m.reactions.isNotEmpty()) {
+            Row(modifier = Modifier.padding(top = 2.dp)) {
+                m.reactions.values.groupingBy { it }.eachCount().forEach { (emoji, count) ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        Text(
+                            "$emoji $count",
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

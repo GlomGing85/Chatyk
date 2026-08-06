@@ -20,11 +20,12 @@ import kotlinx.coroutines.tasks.await
 
 /** Одне повідомлення в чаті */
 data class Message(
-    val id: String = "",      // унікальний id у Firebase
-    val uid: String = "",     // хто написав
-    val name: String = "",    // ім'я автора
-    val text: String = "",    // текст
-    val ts: Long = 0L         // час (мілісекунди)
+    val id: String = "",              // унікальний id у Firebase
+    val uid: String = "",             // хто написав
+    val name: String = "",            // ім'я автора
+    val text: String = "",            // текст
+    val ts: Long = 0L,                // час (мілісекунди)
+    val reactions: Map<String, String> = emptyMap() // uid -> емодзі (реакції)
 )
 
 /** Інформація про користувача в кімнаті (для статусу "онлайн") */
@@ -186,6 +187,26 @@ class ChatViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Поставити/прибрати реакцію-емодзі на повідомленні.
+     * Якщо ти вже поставив це емодзі — воно прибереться (toggle).
+     */
+    fun toggleReaction(messageId: String, emoji: String) {
+        val myUid = myUid ?: return
+        val msg = messages.firstOrNull { it.id == messageId } ?: return
+        val newReactions = msg.reactions.toMutableMap()
+        if (newReactions[myUid] == emoji) {
+            newReactions.remove(myUid)
+        } else {
+            newReactions[myUid] = emoji
+        }
+        db.getReference("rooms/$roomCode/messages/$messageId/reactions")
+            .setValue(newReactions)
+            .addOnFailureListener { e ->
+                dbError = "Не вдалося оновити реакцію: ${e.message}"
+            }
+    }
+
     /** Вийти з кімнати та повернутися на екран входу */
     fun exit() {
         detachRoom()
@@ -212,13 +233,20 @@ class ChatViewModel : ViewModel() {
     }
 
     /** Перетворити дані з Firebase на об'єкт Message */
-    private fun DataSnapshot.toMessage(): Message = Message(
-        id = key ?: "",
-        uid = child("uid").getValue(String::class.java) ?: "",
-        name = child("name").getValue(String::class.java) ?: "",
-        text = child("text").getValue(String::class.java) ?: "",
-        ts = child("ts").getValue(Long::class.java) ?: 0L
-    )
+    private fun DataSnapshot.toMessage(): Message {
+        val reactions = mutableMapOf<String, String>()
+        child("reactions").children.forEach { r ->
+            reactions[r.key ?: ""] = r.getValue(String::class.java) ?: ""
+        }
+        return Message(
+            id = key ?: "",
+            uid = child("uid").getValue(String::class.java) ?: "",
+            name = child("name").getValue(String::class.java) ?: "",
+            text = child("text").getValue(String::class.java) ?: "",
+            ts = child("ts").getValue(Long::class.java) ?: 0L,
+            reactions = reactions
+        )
+    }
 
     override fun onCleared() {
         detachRoom()

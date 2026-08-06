@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.messenger"
         minSdk = 24   // Android 7.0 і новіші
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "0.0.3-Alpha1"
     }
 
     buildTypes {
