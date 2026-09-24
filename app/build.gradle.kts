@@ -5,17 +5,37 @@ plugins {
     id("com.google.gms.google-services") // потрібен для Firebase
 }
 
+// ---- Постійний ключ підпису (див. DOCS.md → «Ключ підпису») ----
+// У GitHub Actions шлях до ключа та паролі приходять зі змінних середовища,
+// які заповнюються із секретів репозиторію. У самому коді ключа НЕМАЄ.
+val chatykKeystore: File? = System.getenv("CHATYK_KEYSTORE")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { file(it) }
+    ?.takeIf { it.exists() }
+
 android {
     namespace = "com.example.messenger"
     compileSdk = 34
 
     defaultConfig {
-        // Цей package name обов'язково вкажи в Firebase (див. README)!
+        // Цей package name обов'язково вкажи в Firebase (див. DOCS.md)!
         applicationId = "com.example.messenger"
         minSdk = 24   // Android 7.0 і новіші
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.0.3-Alpha1"
+        versionCode = 3            // ⬆️ збільшуй при кожній новій версії
+        versionName = "0.0.3"
+    }
+
+    signingConfigs {
+        if (chatykKeystore != null) {
+            create("chatyk") {
+                val password = System.getenv("CHATYK_KEYSTORE_PASSWORD").orEmpty()
+                storeFile = chatykKeystore
+                storePassword = password
+                keyAlias = System.getenv("CHATYK_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "chatyk"
+                keyPassword = System.getenv("CHATYK_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: password
+            }
+        }
     }
 
     buildTypes {
@@ -25,6 +45,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Є постійний ключ → підписуємо ним (оновлення ставляться поверх старої версії).
+            // Немає (наприклад, у форку без секретів) → тимчасовим debug-ключем,
+            // щоб APK все одно можна було встановити.
+            signingConfig = signingConfigs.findByName("chatyk")
+                ?: signingConfigs.getByName("debug")
         }
     }
 

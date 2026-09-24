@@ -10,3 +10,13 @@
 .externalNativeBuild
 .cxx
 *.keystore
+
+# Зібрані APK — їм місце в Releases, а не в коді
+*.apk
+*.aab
+
+# Ключі підпису — НІКОЛИ не заливати в репозиторій!
+*.jks
+*.p12
+*.pem
+keystore.properties

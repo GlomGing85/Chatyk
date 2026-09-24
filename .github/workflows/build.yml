@@ -28,19 +28,56 @@ jobs:
             echo "✅ google-services.json знайдено"
           else
             echo "❌ У папці app/ немає файлу google-services.json"
-            echo "   Як його отримати — дивись розділ «Крок 2: Firebase» у README.md"
+            echo "   Як його отримати — дивись DOCS.md, «Крок 2. Firebase»"
             exit 1
+          fi
+
+      # Постійний ключ підпису береться із секретів репозиторію
+      # (їх створює скрипт scripts/setup-signing.sh — див. DOCS.md → «Ключ підпису»)
+      - name: Підготувати ключ підпису
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/chatyk-release.jks"
+            echo "CHATYK_KEYSTORE=$RUNNER_TEMP/chatyk-release.jks" >> "$GITHUB_ENV"
+            echo "✅ Постійний ключ підпису знайдено — оновлення ставитимуться поверх старої версії"
+          else
+            echo "::warning title=Немає постійного ключа підпису::APK підписано тимчасовим ключем, тож поверх старої версії він не встановиться. Як виправити: DOCS.md → «Ключ підпису»."
           fi
 
       - name: Налаштувати Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Зібрати APK
-        run: chmod +x gradlew && ./gradlew assembleDebug
+        env:
+          CHATYK_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          CHATYK_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: chmod +x gradlew && ./gradlew assembleRelease
+
+      # Відбиток підпису у звіті збірки: у всіх версій він має бути ОДНАКОВИЙ
+      - name: Показати відбиток підпису
+        continue-on-error: true
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          FP=$("$BT/apksigner" verify --print-certs "$APK" | grep -m1 'SHA-256 digest' | sed 's/.*: //' \
+               | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//')
+          echo "🔏 Відбиток підпису (SHA-256): $FP"
+          {
+            echo "### 🔏 Відбиток підпису APK"
+            echo '```'
+            echo "$FP"
+            echo '```'
+            if [ -z "${CHATYK_KEYSTORE:-}" ]; then
+              echo "⚠️ Тимчасовий ключ — оновлення поверх старої версії не спрацює."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Завантажити APK як артефакт
         uses: actions/upload-artifact@v4
         with:
           name: chatyk-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk
           retention-days: 90
+          if-no-files-found: error
