@@ -3,6 +3,7 @@ package com.example.messenger
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -10,7 +11,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
  * Точка входу в додаток.
@@ -18,6 +18,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * вхід (LoginScreen) чи чат (ChatScreen).
  */
 class MainActivity : ComponentActivity() {
+
+    /** Одна ViewModel на весь екран: переживає поворот екрана */
+    private val vm: ChatViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -26,7 +30,6 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val vm: ChatViewModel = viewModel()
                     if (!vm.started) {
                         LoginScreen(vm)
                     } else {
@@ -35,6 +38,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // Статус «у мережі» — лише поки додаток видно на екрані
+    override fun onStart() {
+        super.onStart()
+        vm.onAppForeground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // При повороті екрана активність перестворюється — це не «пішов у фон»
+        if (!isChangingConfigurations) vm.onAppBackground()
     }
 }
 

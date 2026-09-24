@@ -1,8 +1,10 @@
 package com.example.messenger
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -75,10 +78,17 @@ fun ChatScreen(vm: ChatViewModel) {
     val messages = vm.messages
     val presence = vm.presence
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    var text by remember { mutableStateOf("") }
-    var reactingId by remember { mutableStateOf<String?>(null) } // яке повідомлення "відкрито" для реакцій
+    // rememberSaveable — щоб набраний текст не зникав при повороті екрана
+    var text by rememberSaveable { mutableStateOf("") }
+    var reactingId by rememberSaveable { mutableStateOf<String?>(null) } // яке повідомлення "відкрито" для реакцій
     val listState = rememberLazyListState()
+
+    // Кнопка «Назад»: спершу закриває вибір реакції, а потім виводить із кімнати
+    // (раніше «Назад» просто закривав додаток)
+    BackHandler { vm.exit() }
+    BackHandler(enabled = reactingId != null) { reactingId = null }
 
     // "Годинник": кожні 10 секунд оновлюємо час,
     // щоб перераховувати статус "онлайн"
@@ -90,8 +100,10 @@ fun ChatScreen(vm: ChatViewModel) {
         }
     }
 
+    // Рахуємо за часом СЕРВЕРА: годинник телефона може поспішати чи відставати
+    val serverNow = now + vm.serverTimeOffset
     val othersOnline = presence.values.count {
-        it.uid != myUid && now - it.lastSeen < ONLINE_WINDOW_MS
+        it.uid != myUid && serverNow - it.lastSeen < ONLINE_WINDOW_MS
     }
 
     // Чи список прикручений донизу (щоб вирішити: автоскрол чи кнопка "вниз")
@@ -104,10 +116,13 @@ fun ChatScreen(vm: ChatViewModel) {
         }.collect { nearBottom = it }
     }
 
-    // Нове повідомлення → доскролити вниз (якщо ми і так внизу)
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && nearBottom) {
-            listState.scrollToItem(messages.size - 1)
+    // Нове повідомлення → доскролити вниз, якщо ми і так унизу або це НАШЕ повідомлення.
+    // Стежимо за id останнього повідомлення, а не за кількістю: коли в кімнаті вже
+    // MESSAGE_LIMIT повідомлень, кількість не змінюється (найстаріше зникає зі списку).
+    val lastMessage = messages.lastOrNull()
+    LaunchedEffect(lastMessage?.id) {
+        if (lastMessage != null && (nearBottom || lastMessage.uid == myUid)) {
+            listState.scrollToItem(messages.lastIndex)
         }
     }
 
@@ -160,8 +175,12 @@ fun ChatScreen(vm: ChatViewModel) {
                 ) {
                     OutlinedTextField(
                         value = text,
-                        onValueChange = { text = it },
+                        onValueChange = { text = it.take(MAX_MESSAGE_LENGTH) },
                         placeholder = { Text("Повідомлення…") },
+                        // Лічильник з'являється лише біля ліміту довжини
+                        supportingText = if (text.length > MAX_MESSAGE_LENGTH - 200) {
+                            { Text("${text.length} / $MAX_MESSAGE_LENGTH") }
+                        } else null,
                         maxLines = 4,
                         modifier = Modifier.weight(1f)
                     )
@@ -184,14 +203,16 @@ fun ChatScreen(vm: ChatViewModel) {
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                // Червоненький банер з помилкою бази даних (якщо є)
+                // Червоненький банер з помилкою бази даних (якщо є). Тап — сховати.
                 vm.dbError?.let { err ->
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { vm.clearDbError() }
                     ) {
                         Text(
-                            err,
+                            "$err  ✖",
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -240,9 +261,8 @@ fun ChatScreen(vm: ChatViewModel) {
 
         // Кнопка "доскролити вниз", якщо користувач піднявся вгору
         if (!nearBottom && messages.isNotEmpty()) {
-            val scope = rememberCoroutineScope()
             FloatingActionButton(
-                onClick = { scope.launch { listState.animateScrollToItem(messages.size - 1) } },
+                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 16.dp, bottom = 88.dp)

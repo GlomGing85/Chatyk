@@ -18,7 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,8 +33,10 @@ import kotlin.random.Random
  */
 @Composable
 fun LoginScreen(vm: ChatViewModel) {
-    var nickname by remember { mutableStateOf(randomNickname()) }
-    var room by remember { mutableStateOf("") }
+    // rememberSaveable — поля не скидаються при повороті екрана.
+    // Після виходу з кімнати підставляємо попередній нікнейм і код.
+    var nickname by rememberSaveable { mutableStateOf(vm.myName.ifEmpty { randomNickname() }) }
+    var room by rememberSaveable { mutableStateOf(vm.roomCode) }
 
     Column(
         modifier = Modifier
@@ -60,7 +62,7 @@ fun LoginScreen(vm: ChatViewModel) {
 
         OutlinedTextField(
             value = nickname,
-            onValueChange = { if (it.length <= 24) nickname = it },
+            onValueChange = { if (it.length <= MAX_NAME_LENGTH) nickname = it },
             label = { Text("Твій нікнейм") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -70,7 +72,8 @@ fun LoginScreen(vm: ChatViewModel) {
 
         OutlinedTextField(
             value = room,
-            onValueChange = { room = it.lowercase().filter { c -> c.isLetterOrDigit() || c == '-' } },
+            // лише малі літери, цифри й дефіс; пробіл сам стає дефісом
+            onValueChange = { room = normalizeRoomCode(it) },
             label = { Text("Код кімнати") },
             placeholder = { Text("наприклад: kvity-2026") },
             singleLine = true,

@@ -1,0 +1,58 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".validate": "$room.length <= 64",
+        "messages": {
+          ".read": "auth != null",
+          "$msgId": {
+            ".write": "auth != null && ((!data.exists() && newData.child('uid').val() === auth.uid) || (data.exists() && !newData.exists() && data.child('uid').val() === auth.uid))",
+            ".validate": "newData.hasChildren(['uid', 'name', 'text', 'ts'])",
+            "uid": {
+              ".validate": "newData.isString()"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 24"
+            },
+            "text": {
+              ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 2000"
+            },
+            "ts": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            },
+            "reactions": {
+              "$uid": {
+                ".write": "auth != null && auth.uid === $uid",
+                ".validate": "auth.uid === $uid && newData.isString() && newData.val().length >= 1 && newData.val().length <= 16"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "presence": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.hasChild('lastSeen')",
+            "name": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "lastSeen": {
+              ".validate": "newData.isNumber() && newData.val() <= now"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}
