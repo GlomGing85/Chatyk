@@ -20,3 +20,6 @@
 *.p12
 *.pem
 keystore.properties
+
+# Kotlin compiler local state
+.kotlin/

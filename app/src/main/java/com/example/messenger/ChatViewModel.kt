@@ -3,7 +3,14 @@ package com.example.messenger
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.ChildEventListener
@@ -72,7 +79,32 @@ fun normalizeRoomCode(raw: String): String =
  *   rooms/{код_кімнати}/messages/{id}   — повідомлення
  *   rooms/{код_кімнати}/presence/{uid}  — хто онлайн
  */
-class ChatViewModel : ViewModel() {
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    private val preferences = application.getSharedPreferences("chatyk", 0)
+    var showTimes by mutableStateOf(preferences.getBoolean("showTimes", true))
+        private set
+    fun updateShowTimes(value: Boolean) {
+        showTimes = value
+        preferences.edit().putBoolean("showTimes", value).apply()
+    }
+    fun draft(): String = preferences.getString("draft:$roomCode", "").orEmpty()
+    fun saveDraft(value: String) { preferences.edit().putString("draft:$roomCode", value).apply() }
+    private var connectionJob: Job? = null
+    private var connectionAttempt = 0L
+    var reverseNavigation by mutableStateOf(false)
+        private set
+    fun navigateBack() { backHome(); reverseNavigation = true }
+    fun backHome() {
+        reverseNavigation = false
+        connectionAttempt++
+        connectionJob?.cancel()
+        connectionJob = null
+        busy = false
+        error = null
+        exit()
+    }
+    fun retry() = start(myName, roomCode)
+
 
     // --- Стан, який бачить інтерфейс (Compose перемальовується, коли він змінюється) ---
 
@@ -85,9 +117,9 @@ class ChatViewModel : ViewModel() {
     var dbError by mutableStateOf<String?>(null)  // помилка бази даних (видно в чаті)
         private set
 
-    var myName by mutableStateOf("")
+    var myName by mutableStateOf(preferences.getString("name", "").orEmpty())
         private set
-    var roomCode by mutableStateOf("")
+    var roomCode by mutableStateOf(preferences.getString("room", "").orEmpty())
         private set
     var myUid by mutableStateOf<String?>(null)
         private set
@@ -107,7 +139,14 @@ class ChatViewModel : ViewModel() {
     // --- Firebase ---
 
     private val auth = FirebaseAuth.getInstance()
-    private val db = FirebaseDatabase.getInstance()
+    private val db = FirebaseDatabase.getInstance().also {
+        // Configure once, before any reference; RTDB persists history and queued writes.
+        if (!persistenceConfigured) {
+            it.setPersistenceEnabled(true)
+            persistenceConfigured = true
+        }
+    }
+    companion object { private var persistenceConfigured = false }
 
     /** Адреса бази даних, до якої реально підключений додаток (для перевірки) */
     val dbUrl: String
@@ -140,27 +179,57 @@ class ChatViewModel : ViewModel() {
             error = "Введи код кімнати"
             return
         }
+        if (nickname.isBlank()) return
+        myName = nickname.trim().take(MAX_NAME_LENGTH)
+        roomCode = code
+        preferences.edit().putString("name", myName).putString("room", code).apply()
+        reverseNavigation = false
         busy = true
         error = null
         dbError = null
-        viewModelScope.launch {
+        val attempt = ++connectionAttempt
+        connectionJob = viewModelScope.launch {
             try {
-                if (auth.currentUser == null) {
-                    auth.signInAnonymously().await()
+                withTimeout(20_000) {
+                    if (auth.currentUser == null) auth.signInAnonymously().await()
+                    val uid = auth.currentUser?.uid ?: error("AUTH_NO_USER")
+                    myUid = uid
+                    awaitConnection()
+                    val initial = db.getReference("rooms").child(code).child("messages")
+                        .orderByKey().limitToLast(MESSAGE_LIMIT).get().await()
+                    attachRoom(uid)
+                    initial.children.forEach { putMessage(it) }
+                    started = true
                 }
-                val uid = auth.currentUser?.uid
-                    ?: throw IllegalStateException("Не вдалося увійти у Firebase")
-                myUid = uid
-                myName = nickname.trim().take(MAX_NAME_LENGTH).ifEmpty { "Анонім" }
-                roomCode = code
-                attachRoom(uid)
-                started = true
+            } catch (e: TimeoutCancellationException) {
+                detachRoom()
+                error = "CONNECTION_TIMEOUT: сервер не відповів за 20 секунд."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                error = "Помилка входу: ${e.message}"
+                detachRoom()
+                error = "${e.javaClass.simpleName}: ${e.localizedMessage ?: "Невідома помилка"}"
             } finally {
-                busy = false
+                if (attempt == connectionAttempt) busy = false
             }
         }
+    }
+
+    private suspend fun awaitConnection(): Unit = suspendCancellableCoroutine { continuation ->
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (snapshot.value == true && continuation.isActive) {
+                    connectedRef.removeEventListener(this)
+                    continuation.resume(Unit)
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                connectedRef.removeEventListener(this)
+                if (continuation.isActive) continuation.resumeWithException(error.toException())
+            }
+        }
+        connectedRef.addValueEventListener(listener)
+        continuation.invokeOnCancellation { connectedRef.removeEventListener(listener) }
     }
 
     /** Підписатися на повідомлення та статус користувачів у кімнаті */

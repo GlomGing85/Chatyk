@@ -2,41 +2,20 @@ package com.example.messenger
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,9 +28,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
@@ -62,7 +40,6 @@ import kotlinx.coroutines.launch
 
 /** Скільки мілісекунд "lastSeen" вважаємо користувача онлайн */
 private const val ONLINE_WINDOW_MS = 45_000L
-private val OnlineGreen = Color(0xFF6FCF97)
 
 /** Емодзі, доступні для реакцій на повідомлення */
 private val ReactionEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "🔥")
@@ -71,9 +48,9 @@ private val ReactionEmojis = listOf("👍", "❤️", "😂", "😮", "😢", "�
  * Екран чату: стрічка повідомлень + поле для тексту.
  * Повідомлення з'являються в реальному часі.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ChatScreen(vm: ChatViewModel) {
+fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
     val myUid = vm.myUid ?: return
     val messages = vm.messages
     val presence = vm.presence
@@ -81,13 +58,13 @@ fun ChatScreen(vm: ChatViewModel) {
     val scope = rememberCoroutineScope()
 
     // rememberSaveable — щоб набраний текст не зникав при повороті екрана
-    var text by rememberSaveable { mutableStateOf("") }
+    var text by rememberSaveable { mutableStateOf(vm.draft()) }
     var reactingId by rememberSaveable { mutableStateOf<String?>(null) } // яке повідомлення "відкрито" для реакцій
     val listState = rememberLazyListState()
 
     // Кнопка «Назад»: спершу закриває вибір реакції, а потім виводить із кімнати
     // (раніше «Назад» просто закривав додаток)
-    BackHandler { vm.exit() }
+    BackHandler { vm.navigateBack() }
     BackHandler(enabled = reactingId != null) { reactingId = null }
 
     // "Годинник": кожні 10 секунд оновлюємо час,
@@ -129,71 +106,64 @@ fun ChatScreen(vm: ChatViewModel) {
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text("Кімната: ${vm.roomCode}", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                if (othersOnline > 0) "🟢 у мережі: $othersOnline" else "○ нікого немає",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (othersOnline > 0) OnlineGreen
-                                else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    actions = {
-                        // Поділитися кодом кімнати з другом
-                        IconButton(onClick = {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(
-                                    Intent.EXTRA_TEXT,
-                                    "Заходь у Чатик! 💬\nКод кімнати: ${vm.roomCode}"
-                                )
+                Column {
+                    TopAppBar(
+                        title = { Text("Кімната: ${vm.roomCode}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        navigationIcon = { SymbolButton(R.drawable.symbol_settings, "Налаштування", settings) }
+                    )
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            tonalElevation = 2.dp, modifier = Modifier.weight(1f)) {
+                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Symbol(R.drawable.symbol_circle, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (othersOnline > 0) "У мережі: $othersOnline" else "Нікого",
+                                    style = MaterialTheme.typography.labelLarge)
                             }
-                            context.startActivity(
-                                Intent.createChooser(shareIntent, "Поділитися кодом кімнати")
-                            )
-                        }) {
-                            Icon(
-                                Icons.Default.Share,
-                                contentDescription = "Поділитися кодом кімнати"
-                            )
                         }
-                        TextButton(onClick = { vm.exit() }) { Text("Вийти") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ActionButton("", {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, "Заходь у Чатик! Код кімнати: ${vm.roomCode}")
+                            }
+                            runCatching { context.startActivity(Intent.createChooser(intent, "Поділитися кодом")) }
+                                .onFailure { android.widget.Toast.makeText(context, "Немає застосунку для поширення", android.widget.Toast.LENGTH_SHORT).show() }
+                        }, icon = R.drawable.symbol_share, description = "Поділитися кодом",
+                            modifier = Modifier.width(56.dp), shape = ButtonGroupDefaults.connectedLeadingButtonShape)
+                        ActionButton("Вийти", vm::backHome, shape = ButtonGroupDefaults.connectedTrailingButtonShape)
+                        }
                     }
-                )
+                }
             },
             bottomBar = {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .imePadding()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it.take(MAX_MESSAGE_LENGTH) },
-                        placeholder = { Text("Повідомлення…") },
-                        // Лічильник з'являється лише біля ліміту довжини
-                        supportingText = if (text.length > MAX_MESSAGE_LENGTH - 200) {
-                            { Text("${text.length} / $MAX_MESSAGE_LENGTH") }
-                        } else null,
-                        maxLines = 4,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = {
+                Surface(Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+                    shape = RoundedCornerShape(48.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 88.dp).padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextField(
+                            value = text,
+                            onValueChange = { text = it.take(MAX_MESSAGE_LENGTH); vm.saveDraft(text) },
+                            maxLines = 4,
+                            placeholder = { Text("Повідомлення…") },
+                            supportingText = if (text.length > MAX_MESSAGE_LENGTH - 200) {
+                                { Text("${text.length} / $MAX_MESSAGE_LENGTH") }
+                            } else null,
+                            shape = RoundedCornerShape(28.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                focusedIndicatorColor = MaterialTheme.colorScheme.outline.copy(alpha = 0f),
+                                unfocusedIndicatorColor = MaterialTheme.colorScheme.outline.copy(alpha = 0f)
+                            ),
+                            modifier = Modifier.weight(1f).semantics { contentDescription = "Повідомлення" }
+                        )
+                        SymbolButton(R.drawable.symbol_send, "Надіслати", {
                             vm.send(text)
                             text = ""
-                        },
-                        enabled = text.isNotBlank(),
-                        modifier = Modifier.height(56.dp)
-                    ) {
-                        Text("➤", fontSize = 20.sp)
+                            vm.saveDraft("")
+                        }, filled = true, enabled = text.isNotBlank())
                     }
                 }
             }
@@ -209,14 +179,12 @@ fun ChatScreen(vm: ChatViewModel) {
                         color = MaterialTheme.colorScheme.errorContainer,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { vm.clearDbError() }
                     ) {
-                        Text(
-                            "$err  ✖",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
+                        Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(err, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall)
+                            SymbolButton(R.drawable.symbol_close, "Сховати помилку", vm::clearDbError)
+                        }
                     }
                 }
 
@@ -227,10 +195,12 @@ fun ChatScreen(vm: ChatViewModel) {
                             .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "👋 Поки порожньо. Напиши перше повідомлення!",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                            StateSymbol(R.drawable.symbol_sentiment_excited)
+                            Spacer(Modifier.height(24.dp))
+                            Text("Будьте першим, хто напише!", style = MaterialTheme.typography.titleLarge,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -238,13 +208,14 @@ fun ChatScreen(vm: ChatViewModel) {
                         modifier = Modifier
                             .fillMaxSize()
                             .weight(1f),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(messages, key = { it.id }) { m ->
                             MessageBubble(
                                 m = m,
                                 isMine = m.uid == myUid,
+                                showTime = vm.showTimes,
                                 showPicker = reactingId == m.id,
                                 onLongPress = { reactingId = m.id },
                                 onPickEmoji = { emoji ->
@@ -261,13 +232,15 @@ fun ChatScreen(vm: ChatViewModel) {
 
         // Кнопка "доскролити вниз", якщо користувач піднявся вгору
         if (!nearBottom && messages.isNotEmpty()) {
+            val (fabSource, fabScale) = pressSource()
             FloatingActionButton(
+                interactionSource = fabSource,
                 onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 88.dp)
+                    .navigationBarsPadding().imePadding().padding(end = 16.dp, bottom = 104.dp).scale(fabScale)
             ) {
-                Text("↓", fontSize = 20.sp)
+                Symbol(R.drawable.symbol_arrow_downward, "До останнього повідомлення")
             }
         }
     }
@@ -279,6 +252,7 @@ fun ChatScreen(vm: ChatViewModel) {
 private fun MessageBubble(
     m: Message,
     isMine: Boolean,
+    showTime: Boolean,
     showPicker: Boolean,
     onLongPress: () -> Unit,
     onPickEmoji: (String) -> Unit,
@@ -302,66 +276,55 @@ private fun MessageBubble(
                 modifier = Modifier
                     .padding(vertical = 4.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ReactionEmojis.forEach { emoji ->
-                    Text(
-                        emoji,
-                        fontSize = 20.sp,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .combinedClickable(
-                                onClick = { onPickEmoji(emoji) },
-                                onLongClick = onDismissPicker
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                    val (source, scale) = pressSource()
+                    TextButton(onClick = { onPickEmoji(emoji) }, modifier = Modifier.size(48.dp).scale(scale),
+                        interactionSource = source, contentPadding = PaddingValues(0.dp)) {
+                        Text(emoji, fontSize = 20.sp)
+                    }
                 }
-                Text(
-                    "✖",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .padding(start = 4.dp)
-                        .combinedClickable(onClick = onDismissPicker, onLongClick = onDismissPicker)
-                        .padding(4.dp)
-                )
+                SymbolButton(R.drawable.symbol_close, "Закрити реакції", onDismissPicker)
             }
         }
 
         // Саме повідомлення
+        val (bubbleSource, bubbleScale) = pressSource()
         Column(
             modifier = Modifier
                 .padding(top = 2.dp)
-                .widthIn(max = 300.dp)
+                .widthIn(max = 300.dp).scale(bubbleScale)
                 .clip(
                     RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isMine) 16.dp else 4.dp,
-                        bottomEnd = if (isMine) 4.dp else 16.dp
+                        topStart = 32.dp,
+                        topEnd = 32.dp,
+                        bottomStart = if (isMine) 32.dp else 8.dp,
+                        bottomEnd = if (isMine) 8.dp else 32.dp
                     )
                 )
                 .background(
-                    if (isMine) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant
+                    if (isMine) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest
                 )
                 .combinedClickable(
-                    onClick = { },
+                    interactionSource = bubbleSource, indication = ripple(),
+                    onClickLabel = "Реакції", onLongClickLabel = "Реакції",
+                    onClick = onLongPress,
                     onLongClick = onLongPress
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Text(
                 m.text,
-                color = if (isMine) Color.White else MaterialTheme.colorScheme.onSurface
+                color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
             )
-            Text(
+            if (showTime) Text(
                 formatTime(m.ts),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isMine) Color(0xFFDDD7FF)
+                color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.End)
             )
@@ -369,10 +332,10 @@ private fun MessageBubble(
 
         // Чіпси з реакціями, напр. "👍 2" "😂 1"
         if (m.reactions.isNotEmpty()) {
-            Row(modifier = Modifier.padding(top = 2.dp)) {
+            Row(modifier = Modifier.padding(top = 2.dp).horizontalScroll(rememberScrollState())) {
                 m.reactions.values.groupingBy { it }.eachCount().forEach { (emoji, count) ->
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.padding(end = 4.dp)
                     ) {

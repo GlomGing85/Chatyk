@@ -171,8 +171,8 @@ GitHub Actions запускається автоматично після кож
 
 ```kotlin
 defaultConfig {
-    versionCode = 3          // ⬆️ ЗБІЛЬШУЙ при кожній версії (1, 2, 3, …)
-    versionName = "0.0.3"    // етикетка, яку бачить користувач
+    versionCode = 4          // ⬆️ ЗБІЛЬШУЙ при кожній версії (1, 2, 3, …)
+    versionName = "0.0.4-alpha1"    // етикетка, яку бачить користувач
 }
 ```
 
@@ -189,13 +189,13 @@ rm -f app-release.apk            # прибрати старий файл, як�
 gh run download --name chatyk-apk
 
 # 2) створити реліз і прикріпити APK
-gh release create v0.0.3 \
-  --title "Чатик 0.0.3" \
+gh release create v0.0.4-alpha1 --prerelease \
+  --title "Чатик 0.0.4-alpha1" \
   --notes "Опис змін..." \
   app-release.apk
 ```
 
-Оновити існуючий реліз: `gh release upload v0.0.3 app-release.apk --clobber`.
+Оновити існуючий реліз: `gh release upload v0.0.4-alpha1 app-release.apk --clobber`.
 
 > APK у папці проєкту не потрапить у коміт — `.gitignore` ігнорує `*.apk`.
 
@@ -248,3 +248,47 @@ Realtime Database → Rules** і натисни **Publish** — як у кроц
 ---
 
 *Документація — частина проєкту [Chatyk](https://github.com/GlomGing85/Chatyk).*
+
+
+## 0.0.4-alpha1: новий UI та збірка
+
+- **Не генеруй новий ключ:** використовуються ті самі secrets, що в 0.0.3.
+- `applicationId` незмінний; 0.0.4-alpha1 встановлюється поверх 0.0.3,
+  якщо SHA-256 підпису збігається. Для основного репозиторію це:
+  `AE:17:F6:62:CD:91:89:6C:C1:1B:F0:08:0A:E9:23:8A:16:3A:75:4A:E9:12:82:96:1C:B6:1E:FC:65:E5:38:DA`.
+- Правила `database.rules.json` не змінені; повторно публікувати їх не потрібно,
+  якщо правила версії 0.0.3 уже опубліковані.
+- У налаштуваннях (шестерня на головній або в чаті) можна приховати час
+  повідомлень. Тема лише темна. Вкладень у цій версії немає.
+- Нікнейм, останній код, налаштування й чернетки зберігаються в SharedPreferences.
+  Firebase зберігає кеш та чергу записів на диску. Для нового входу в кімнату
+  потрібна мережа. Це не наскрізне шифрування; код кімнати не є паролем.
+
+### Технічні вимоги
+
+Java 17, Gradle 9.3.1 (wrapper), Android SDK Platform **37.0**,
+Build Tools 36.0.0. Actions встановлює їх автоматично.
+`compileSdkMinor = 0` важливий: пакет SDK має назву `android-37.0`.
+Мінімум для встановлення лишається Android 7.0 (`minSdk = 24`), `targetSdk = 34`.
+
+```bash
+./gradlew testDebugUnitTest assembleRelease lintRelease
+```
+
+`testDebugUnitTest` — локальні JVM-тести, **не** запуск на емуляторі чи пристрої.
+Перевірки не звертаються до авторської Firebase-бази.
+
+Відомі попередження інструментів: AGP 9.1 офіційно тестувався до SDK 36.1,
+старий Kotlin/Android DSL буде вилучено в AGP 10, target SDK навмисно лишився 34.
+Не оновлюй AGP до 10 без міграції DSL. Версії Compose зафіксовані для
+відтворюваності; Expressive API експериментальні.
+
+Після push дочекайся **успішного run саме нового коміту**, перевір відбиток
+у його Summary та завантаж APK із нього (не зі старого run):
+
+```bash
+gh run list --limit 5
+# Команда нижче пропонує вибрати run. Обери успішну збірку 0.0.4-alpha1.
+rm -f app-release.apk
+gh run download --name chatyk-apk
+```

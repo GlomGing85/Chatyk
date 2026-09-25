@@ -2,6 +2,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services") // потрібен для Firebase
 }
 
@@ -15,15 +16,16 @@ val chatykKeystore: File? = System.getenv("CHATYK_KEYSTORE")
 
 android {
     namespace = "com.example.messenger"
-    compileSdk = 34
+    compileSdk = 37
+    compileSdkMinor = 0
 
     defaultConfig {
         // Цей package name обов'язково вкажи в Firebase (див. DOCS.md)!
         applicationId = "com.example.messenger"
         minSdk = 24   // Android 7.0 і новіші
         targetSdk = 34
-        versionCode = 3            // ⬆️ збільшуй при кожній новій версії
-        versionName = "0.0.3"
+        versionCode = 4            // ⬆️ збільшуй при кожній новій версії
+        versionName = "0.0.4-alpha1"
     }
 
     signingConfigs {
@@ -64,20 +66,17 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
+        buildConfig = true
     }
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     // ---- Jetpack Compose (інтерфейс) ----
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.compose.ui:ui:1.13.0-alpha01")
+    implementation("androidx.compose.material3:material3:1.5.0-alpha29")
+    implementation("androidx.compose.ui:ui-tooling-preview:1.13.0-alpha01")
+    debugImplementation("androidx.compose.ui:ui-tooling:1.13.0-alpha01")
 
     // ---- Android-обгортки ----
     implementation("androidx.activity:activity-compose:1.9.0")
