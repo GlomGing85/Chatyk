@@ -49,6 +49,12 @@ jobs:
       - name: Налаштувати Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      # Наявність Android SDK в образі runner не гарантує sdkmanager у PATH.
+      - name: Налаштувати Android SDK tools
+        uses: android-actions/setup-android@v4.0.4
+        with:
+          log-accepted-android-sdk-licenses: false
+
       - name: Встановити Android SDK для Compose Expressive
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
 
