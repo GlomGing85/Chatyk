@@ -24,8 +24,8 @@ android {
         applicationId = "com.example.messenger"
         minSdk = 24   // Android 7.0 і новіші
         targetSdk = 34
-        versionCode = 4            // ⬆️ збільшуй при кожній новій версії
-        versionName = "0.0.4-alpha1"
+        versionCode = 5            // ⬆️ збільшуй при кожній новій версії
+        versionName = "0.0.4-alpha2"
     }
 
     signingConfigs {

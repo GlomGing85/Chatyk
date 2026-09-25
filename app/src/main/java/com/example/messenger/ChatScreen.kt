@@ -2,6 +2,7 @@ package com.example.messenger
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.scale
@@ -29,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,6 +59,9 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
     val presence = vm.presence
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val windowSize = LocalWindowInfo.current.containerSize
+    val density = LocalDensity.current.density
+    val compact = isCompactChat((windowSize.width / density).toInt(), (windowSize.height / density).toInt())
 
     // rememberSaveable — щоб набраний текст не зникав при повороті екрана
     var text by rememberSaveable { mutableStateOf(vm.draft()) }
@@ -111,36 +117,54 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                         title = { Text("Кімната: ${vm.roomCode}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         navigationIcon = { SymbolButton(R.drawable.symbol_settings, "Налаштування", settings) }
                     )
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = if (compact) 4.dp else 8.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            tonalElevation = 2.dp, modifier = Modifier.weight(1f)) {
-                            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Symbol(R.drawable.symbol_circle, modifier = Modifier.size(12.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (othersOnline > 0) "У мережі: $othersOnline" else "Нікого",
-                                    style = MaterialTheme.typography.labelLarge)
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                tonalElevation = 2.dp, modifier = if (compact) Modifier else Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(horizontal = 12.dp, vertical = if (compact) 6.dp else 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Symbol(R.drawable.symbol_circle, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (othersOnline > 0) "У мережі: $othersOnline" else "Нікого",
+                                        style = MaterialTheme.typography.labelLarge)
+                                }
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ActionButton("", {
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, "Заходь у Чатик! Код кімнати: ${vm.roomCode}")
-                            }
-                            runCatching { context.startActivity(Intent.createChooser(intent, "Поділитися кодом")) }
-                                .onFailure { android.widget.Toast.makeText(context, "Немає застосунку для поширення", android.widget.Toast.LENGTH_SHORT).show() }
-                        }, icon = R.drawable.symbol_share, description = "Поділитися кодом",
-                            modifier = Modifier.width(56.dp), shape = ButtonGroupDefaults.connectedLeadingButtonShape)
-                        ActionButton("Вийти", vm::backHome, shape = ButtonGroupDefaults.connectedTrailingButtonShape)
+                            ActionButton("", {
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, "Заходь у Чатик! Код кімнати: ${vm.roomCode}")
+                                }
+                                runCatching { context.startActivity(Intent.createChooser(intent, "Поділитися кодом")) }
+                                    .onFailure { android.widget.Toast.makeText(context, "Немає застосунку для поширення", android.widget.Toast.LENGTH_SHORT).show() }
+                            }, icon = R.drawable.symbol_share, description = "Поділитися кодом",
+                                modifier = Modifier.width(if (compact) 48.dp else 56.dp),
+                                shape = ButtonGroupDefaults.connectedLeadingButtonShape, compact = compact)
+                            ActionButton("Вийти", vm::backHome, shape = ButtonGroupDefaults.connectedTrailingButtonShape, compact = compact)
                         }
+                    }
+                }
+            },
+            // Scaffold positions the button above the actual composer height, including IME.
+            floatingActionButton = {
+                // Кнопка "доскролити вниз", якщо користувач піднявся вгору
+                if (!nearBottom && messages.isNotEmpty()) {
+                    val (fabSource, fabScale) = pressSource()
+                    FloatingActionButton(
+                        interactionSource = fabSource,
+                        onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                        modifier = Modifier.scale(fabScale)
+                    ) {
+                        Symbol(R.drawable.symbol_arrow_downward, "До останнього повідомлення")
                     }
                 }
             },
             bottomBar = {
                 Surface(Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
-                    shape = RoundedCornerShape(48.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 88.dp).padding(16.dp),
+                    shape = RoundedCornerShape(if (compact) 32.dp else 48.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = if (compact) 72.dp else 88.dp)
+                        .padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 8.dp else 16.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextField(
                             value = text,
@@ -163,7 +187,7 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                             vm.send(text)
                             text = ""
                             vm.saveDraft("")
-                        }, filled = true, enabled = text.isNotBlank())
+                        }, filled = true, enabled = text.isNotBlank(), compact = compact)
                     }
                 }
             }
@@ -195,9 +219,10 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                             .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
-                            StateSymbol(R.drawable.symbol_sentiment_excited)
-                            Spacer(Modifier.height(24.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                            StateSymbol(R.drawable.symbol_sentiment_excited, compact = compact)
+                            Spacer(Modifier.height(if (compact) 16.dp else 24.dp))
                             Text("Будьте першим, хто напише!", style = MaterialTheme.typography.titleLarge,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         }
@@ -216,6 +241,7 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                                 m = m,
                                 isMine = m.uid == myUid,
                                 showTime = vm.showTimes,
+                                compact = compact,
                                 showPicker = reactingId == m.id,
                                 onLongPress = { reactingId = m.id },
                                 onPickEmoji = { emoji ->
@@ -229,20 +255,6 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                 }
             }
         }
-
-        // Кнопка "доскролити вниз", якщо користувач піднявся вгору
-        if (!nearBottom && messages.isNotEmpty()) {
-            val (fabSource, fabScale) = pressSource()
-            FloatingActionButton(
-                interactionSource = fabSource,
-                onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding().imePadding().padding(end = 16.dp, bottom = 104.dp).scale(fabScale)
-            ) {
-                Symbol(R.drawable.symbol_arrow_downward, "До останнього повідомлення")
-            }
-        }
     }
 }
 
@@ -253,6 +265,7 @@ private fun MessageBubble(
     m: Message,
     isMine: Boolean,
     showTime: Boolean,
+    compact: Boolean,
     showPicker: Boolean,
     onLongPress: () -> Unit,
     onPickEmoji: (String) -> Unit,
@@ -299,10 +312,10 @@ private fun MessageBubble(
                 .widthIn(max = 300.dp).scale(bubbleScale)
                 .clip(
                     RoundedCornerShape(
-                        topStart = 32.dp,
-                        topEnd = 32.dp,
-                        bottomStart = if (isMine) 32.dp else 8.dp,
-                        bottomEnd = if (isMine) 8.dp else 32.dp
+                        topStart = if (compact) 20.dp else 32.dp,
+                        topEnd = if (compact) 20.dp else 32.dp,
+                        bottomStart = if (!isMine) 8.dp else if (compact) 20.dp else 32.dp,
+                        bottomEnd = if (isMine) 8.dp else if (compact) 20.dp else 32.dp
                     )
                 )
                 .background(

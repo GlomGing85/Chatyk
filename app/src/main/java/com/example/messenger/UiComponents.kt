@@ -36,11 +36,13 @@ fun pressSource(): Pair<MutableInteractionSource, Float> {
 @Composable
 fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier,
                  tonal: Boolean = false, enabled: Boolean = true, icon: Int? = null,
-                 shape: Shape = CircleShape, description: String? = null) {
+                 shape: Shape = CircleShape, description: String? = null, compact: Boolean = false) {
     val (source, scale) = pressSource()
-    Button(onClick, modifier.heightIn(min = 56.dp).scale(scale).semantics { if (description != null) contentDescription = description }, enabled = enabled,
+    Button(onClick, modifier.heightIn(min = if (compact) 40.dp else 56.dp).scale(scale).semantics { if (description != null) contentDescription = description }, enabled = enabled,
         interactionSource = source, shape = shape,
-        contentPadding = if (label.isEmpty()) PaddingValues(0.dp) else ButtonDefaults.ContentPadding,
+        contentPadding = if (label.isEmpty()) PaddingValues(0.dp)
+            else if (compact) PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            else ButtonDefaults.ContentPadding,
         colors = if (tonal) ButtonDefaults.filledTonalButtonColors() else ButtonDefaults.buttonColors()) {
         if (icon != null) { Symbol(icon); if (label.isNotEmpty()) Spacer(Modifier.width(8.dp)) }
         if (label.isNotEmpty()) Text(label)
@@ -49,9 +51,9 @@ fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifi
 
 @Composable
 fun SymbolButton(id: Int, description: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-                 filled: Boolean = false, enabled: Boolean = true) {
+                 filled: Boolean = false, enabled: Boolean = true, compact: Boolean = false) {
     val (source, scale) = pressSource()
-    if (filled) FilledIconButton(onClick, modifier.size(56.dp).scale(scale), enabled = enabled, interactionSource = source) {
+    if (filled) FilledIconButton(onClick, modifier.size(if (compact) 48.dp else 56.dp).scale(scale), enabled = enabled, interactionSource = source) {
         Symbol(id, description)
     } else IconButton(onClick, modifier.size(48.dp).scale(scale), enabled = enabled, interactionSource = source) {
         Symbol(id, description)
@@ -60,10 +62,10 @@ fun SymbolButton(id: Int, description: String, onClick: () -> Unit, modifier: Mo
 
 // These large symbols illustrate a state, not an action: intentionally not clickable.
 @Composable
-fun StateSymbol(id: Int) {
+fun StateSymbol(id: Int, compact: Boolean = false) {
     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(136.dp)) {
-        Box(contentAlignment = Alignment.Center) { Symbol(id, modifier = Modifier.size(64.dp)) }
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(if (compact) 96.dp else 136.dp)) {
+        Box(contentAlignment = Alignment.Center) { Symbol(id, modifier = Modifier.size(if (compact) 48.dp else 64.dp)) }
     }
 }
 
