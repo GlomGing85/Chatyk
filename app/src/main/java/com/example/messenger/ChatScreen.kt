@@ -2,6 +2,9 @@ package com.example.messenger
 
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -67,6 +70,13 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
     var text by rememberSaveable { mutableStateOf(vm.draft()) }
     var reactingId by rememberSaveable { mutableStateOf<String?>(null) } // яке повідомлення "відкрито" для реакцій
     val listState = rememberLazyListState()
+
+    // Системний вибір фото: без дозволів на галерею й без доступу до всіх файлів
+    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) vm.preparePhoto(uri)
+    }
+    // Фото, відкрите на весь екран
+    var viewer by remember { mutableStateOf<PhotoRef?>(null) }
 
     // Кнопка «Назад»: спершу закриває вибір реакції, а потім виводить із кімнати
     // (раніше «Назад» просто закривав додаток)
@@ -163,14 +173,24 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
             bottomBar = {
                 Surface(Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
                     shape = RoundedCornerShape(if (compact) 32.dp else 48.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Column(Modifier.fillMaxWidth()) {
+                    // Прев'ю вибраного фото (з'являється після вибору, до відправки)
+                    PendingPhotoRow(vm, compact)
                     Row(Modifier.fillMaxWidth().heightIn(min = if (compact) 72.dp else 88.dp)
                         .padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 8.dp else 16.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SymbolButton(
+                            R.drawable.symbol_add_photo,
+                            "Додати фото",
+                            { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                            enabled = !vm.preparingPhoto && !vm.sending,
+                            compact = compact
+                        )
                         TextField(
                             value = text,
                             onValueChange = { text = it.take(MAX_MESSAGE_LENGTH); vm.saveDraft(text) },
                             maxLines = 4,
-                            placeholder = { Text("Повідомлення…") },
+                            placeholder = { Text(if (vm.pendingPhoto != null) "Додай підпис…" else "Повідомлення…") },
                             supportingText = if (text.length > MAX_MESSAGE_LENGTH - 200) {
                                 { Text("${text.length} / $MAX_MESSAGE_LENGTH") }
                             } else null,
@@ -183,11 +203,25 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                             ),
                             modifier = Modifier.weight(1f).semantics { contentDescription = "Повідомлення" }
                         )
-                        SymbolButton(R.drawable.symbol_send, "Надіслати", {
-                            vm.send(text)
-                            text = ""
-                            vm.saveDraft("")
-                        }, filled = true, enabled = text.isNotBlank(), compact = compact)
+                        // Поки фото вантажиться — індикатор замість кнопки,
+                        // щоб повідомлення не надіслалося двічі
+                        if (vm.sending) {
+                            Box(Modifier.size(if (compact) 48.dp else 56.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 3.dp)
+                            }
+                        } else {
+                            SymbolButton(R.drawable.symbol_send, "Надіслати", {
+                                // Текст і підпис очищаємо лише тоді, коли відправка
+                                // справді почалася (інакше можна втратити написане)
+                                if (vm.send(text)) {
+                                    text = ""
+                                    vm.saveDraft("")
+                                }
+                            }, filled = true,
+                                enabled = text.isNotBlank() || vm.pendingPhoto != null,
+                                compact = compact)
+                        }
+                    }
                     }
                 }
             }
@@ -238,10 +272,12 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                     ) {
                         items(messages, key = { it.id }) { m ->
                             MessageBubble(
+                                vm = vm,
                                 m = m,
                                 isMine = m.uid == myUid,
                                 showTime = vm.showTimes,
                                 compact = compact,
+                                onOpenPhoto = { viewer = it },
                                 showPicker = reactingId == m.id,
                                 onLongPress = { reactingId = m.id },
                                 onPickEmoji = { emoji ->
@@ -255,6 +291,16 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
                 }
             }
         }
+
+        // Повноекранний перегляд фото
+        viewer?.let { meta ->
+            val photoState = vm.photoStates[meta.id]
+            PhotoViewer(
+                meta = meta,
+                base64 = (photoState as? PhotoState.Ready)?.base64,
+                onDismiss = { viewer = null }
+            )
+        }
     }
 }
 
@@ -262,10 +308,12 @@ fun ChatScreen(vm: ChatViewModel, settings: () -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
+    vm: ChatViewModel,
     m: Message,
     isMine: Boolean,
     showTime: Boolean,
     compact: Boolean,
+    onOpenPhoto: (PhotoRef) -> Unit,
     showPicker: Boolean,
     onLongPress: () -> Unit,
     onPickEmoji: (String) -> Unit,
@@ -330,7 +378,12 @@ private fun MessageBubble(
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text(
+            // Фото (підвантажується ліниво, коли з'явилося на екрані)
+            m.photo?.let { photo ->
+                MessagePhoto(vm = vm, meta = photo, compact = compact, onOpen = { onOpenPhoto(photo) })
+                if (m.text.isNotBlank()) Spacer(Modifier.height(6.dp))
+            }
+            if (m.text.isNotBlank()) Text(
                 m.text,
                 color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
             )

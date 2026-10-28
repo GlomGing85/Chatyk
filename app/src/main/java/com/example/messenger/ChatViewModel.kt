@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CancellationException
@@ -51,7 +52,8 @@ data class Message(
     val name: String = "",            // ім'я автора
     val text: String = "",            // текст
     val ts: Long = 0L,                // час (мілісекунди)
-    val reactions: Map<String, String> = emptyMap() // uid -> емодзі (реакції)
+    val reactions: Map<String, String> = emptyMap(), // uid -> емодзі (реакції)
+    val photo: PhotoRef? = null        // фото в повідомленні (байти лежать окремо)
 )
 
 /** Інформація про користувача в кімнаті (для статусу "онлайн") */
@@ -60,6 +62,17 @@ data class PresenceUser(
     val name: String = "",
     val lastSeen: Long = 0L
 )
+
+/**
+ * Що зараз із зображенням у повідомленні.
+ * Зображення НЕ приходять разом зі стрічкою: спершу видно метадані (розміри),
+ * а байти підвантажуються, коли фото з'являється на екрані.
+ */
+sealed interface PhotoState {
+    data object Loading : PhotoState
+    data class Ready(val base64: String) : PhotoState
+    data object Failed : PhotoState
+}
 
 /**
  * Код кімнати: лише малі літери, цифри та дефіс (пробіл → дефіс).
@@ -127,6 +140,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var messages by mutableStateOf(listOf<Message>())
         private set
     var presence by mutableStateOf(mapOf<String, PresenceUser>())
+        private set
+
+    /** Стан зображень: id фото → завантажується / готове / помилка */
+    var photoStates by mutableStateOf<Map<String, PhotoState>>(emptyMap())
+        private set
+
+    /** Фото, вибране для наступного повідомлення (уже стиснене) */
+    var pendingPhoto by mutableStateOf<PreparedPhoto?>(null)
+        private set
+
+    /** Просто зараз стискаємо щойно вибране фото */
+    var preparingPhoto by mutableStateOf(false)
+        private set
+
+    /** Просто зараз надсилаємо повідомлення (фото вантажиться довше за текст) */
+    var sending by mutableStateOf(false)
         private set
 
     /**
@@ -352,21 +381,128 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         presenceRef?.removeValue()
     }
 
-    /** Надіслати повідомлення в поточну кімнату */
-    fun send(text: String) {
-        val t = text.trim().take(MAX_MESSAGE_LENGTH)
-        val uid = myUid ?: return
-        if (t.isEmpty() || !started) return
-        val data = mapOf(
-            "uid" to uid,
-            "name" to myName,
-            "text" to t,
-            "ts" to ServerValue.TIMESTAMP
-        )
-        messagesRef().push().setValue(data)
-            .addOnFailureListener { e ->
-                dbError = "Повідомлення не надіслано: ${e.message}"
+    // --- Фото ---
+
+    /**
+     * Підготувати вибране фото: стиснути у фоні й показати прев'ю над полем введення.
+     * Користувач ще може прибрати фото або додати підпис перед відправкою.
+     */
+    fun preparePhoto(uri: Uri) {
+        if (preparingPhoto) return
+        preparingPhoto = true
+        pendingPhoto = null
+        viewModelScope.launch {
+            val result = PhotoCompressor.prepare(getApplication(), uri)
+            preparingPhoto = false
+            result
+                .onSuccess { photo ->
+                    pendingPhoto = photo
+                    dbError = null
+                }
+                .onFailure { e -> dbError = PhotoCompressor.errorText(e) }
+        }
+    }
+
+    /** Прибрати вибране фото, нічого не надсилаючи */
+    fun clearPendingPhoto() {
+        pendingPhoto = null
+        preparingPhoto = false
+    }
+
+    /** Підвантажити байти фото (коли бульбашка з'явилася на екрані) */
+    fun ensurePhoto(meta: PhotoRef) {
+        if (!meta.isValid || !started) return
+        val current = photoStates[meta.id]
+        if (current is PhotoState.Ready || current is PhotoState.Loading) return
+        photoStates = photoStates + (meta.id to PhotoState.Loading)
+        viewModelScope.launch {
+            val state = try {
+                val snapshot = db.getReference("rooms").child(roomCode)
+                    .child("photos").child(meta.id).child("data").get().await()
+                val data = snapshot.value as? String
+                if (data.isNullOrEmpty()) PhotoState.Failed else PhotoState.Ready(data)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                PhotoState.Failed
             }
+            photoStates = photoStates + (meta.id to state)
+        }
+    }
+
+    /** Ще раз спробувати завантажити фото, яке не прийшло */
+    fun retryPhoto(meta: PhotoRef) {
+        if (photoStates[meta.id] !is PhotoState.Failed) return
+        photoStates = photoStates - meta.id
+        ensurePhoto(meta)
+    }
+
+    /**
+     * Записати стиснене фото у вузол `rooms/{код}/photos/{id}`.
+     * Окремий вузол потрібен, щоб стрічка чату не тягнула мегабайти зображень.
+     */
+    private suspend fun uploadPhoto(photo: PreparedPhoto): PhotoRef {
+        val uid = myUid ?: error("AUTH_NO_USER")
+        val photos = db.getReference("rooms").child(roomCode).child("photos")
+        val id = photos.push().key ?: error("PHOTO_NO_ID")
+        photos.child(id).setValue(
+            mapOf(
+                "uid" to uid,
+                "ts" to ServerValue.TIMESTAMP,
+                "data" to photo.base64
+            )
+        ).await()
+        // Своє фото показуємо одразу, без повторного читання з мережі
+        photoStates = photoStates + (id to PhotoState.Ready(photo.base64))
+        return PhotoRef(id = id, width = photo.width, height = photo.height, bytes = photo.jpegBytes)
+    }
+
+    /**
+     * Надіслати повідомлення в поточну кімнату.
+     * Якщо вибране фото — спершу вантажимо його, а потім додаємо повідомлення
+     * з підписом (текст може бути порожнім, якщо є фото).
+     *
+     * @return true, якщо відправка почалася — тоді екран очищає поле введення.
+     */
+    fun send(text: String): Boolean {
+        if (sending) return false
+        val uid = myUid ?: return false
+        if (!started) return false
+        val message = text.trim().take(MAX_MESSAGE_LENGTH)
+        val photo = pendingPhoto
+        if (message.isEmpty() && photo == null) return false
+        val messageRef = messagesRef().push()
+        sending = true
+        viewModelScope.launch {
+            try {
+                val photoRef = if (photo != null) uploadPhoto(photo) else null
+                val data = mutableMapOf<String, Any>(
+                    "uid" to uid,
+                    "name" to myName,
+                    "text" to message,
+                    "ts" to ServerValue.TIMESTAMP
+                )
+                if (photoRef != null) {
+                    data["photo"] = mapOf(
+                        "id" to photoRef.id,
+                        "w" to photoRef.width,
+                        "h" to photoRef.height,
+                        "bytes" to photoRef.bytes
+                    )
+                }
+                messageRef.setValue(data).await()
+                pendingPhoto = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val reason = e.message ?: e.javaClass.simpleName
+                dbError = if (photo != null) "Фото не надіслано: $reason"
+                else "Повідомлення не надіслано: $reason"
+            } finally {
+                sending = false
+            }
+        }
+        return true
     }
 
     /**
@@ -397,6 +533,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         started = false
         messages = emptyList()
         presence = emptyMap()
+        photoStates = emptyMap()
+        pendingPhoto = null
+        preparingPhoto = false
+        sending = false
         dbError = null
     }
 
@@ -447,13 +587,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val emoji = r.value as? String
             if (!who.isNullOrEmpty() && !emoji.isNullOrEmpty()) reactions[who] = emoji
         }
+        val photoRef = child("photo").let { p ->
+            if (!p.exists()) return@let null
+            val ref = PhotoRef(
+                id = p.child("id").value as? String ?: "",
+                width = (p.child("w").value as? Number)?.toInt() ?: 0,
+                height = (p.child("h").value as? Number)?.toInt() ?: 0,
+                bytes = (p.child("bytes").value as? Number)?.toInt() ?: 0
+            )
+            if (ref.isValid) ref else null
+        }
         return Message(
             id = key ?: "",
             uid = child("uid").value as? String ?: "",
             name = child("name").value as? String ?: "",
             text = child("text").value as? String ?: "",
             ts = (child("ts").value as? Number)?.toLong() ?: 0L,
-            reactions = reactions
+            reactions = reactions,
+            photo = photoRef
         )
     }
 
